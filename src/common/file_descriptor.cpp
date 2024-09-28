@@ -28,6 +28,29 @@ bool FileDescriptor::Iterator::operator!=(std::nullptr_t) {
   }
 }
 
+void FileDescriptor::Select::operator()(
+    std::initializer_list<FileDescriptor *> l) {
+  FD_ZERO(&fds);
+  int max = 0;
+
+  for (auto fd : l) {
+    FD_SET(fd->fd, &fds);
+
+    if (fd->fd > max) {
+      max = fd->fd;
+    }
+  }
+
+  if (::select(max + 1, &fds, nullptr, nullptr, nullptr) == -1) {
+    perror("cannot select()");
+    throw;
+  }
+}
+
+bool FileDescriptor::Select::ready(const FileDescriptor &fd) const {
+  return FD_ISSET(fd.fd, &fds);
+}
+
 FileDescriptor::FileDescriptor(int fd) : fd(fd) {}
 
 FileDescriptor::~FileDescriptor() {
@@ -46,3 +69,29 @@ void FileDescriptor::write(const std::string &s) {
     throw;
   }
 }
+
+ssize_t FileDescriptor::forward(FileDescriptor &to) {
+  char b[1024];
+
+  const auto n = read(fd, b, sizeof(b));
+
+  switch (n) {
+  case -1:
+    perror("cannot read()");
+    throw;
+  case 0:
+    break;
+  default:
+    to.write({b, static_cast<size_t>(n)});
+  }
+
+  return n;
+}
+
+FileDescriptor::operator bool() const { return select.ready(*this); }
+
+FileDescriptor::Select FileDescriptor::select;
+
+FileDescriptor StdIn{STDIN_FILENO};
+FileDescriptor StdOut{STDOUT_FILENO};
+FileDescriptor StdErr{STDERR_FILENO};
